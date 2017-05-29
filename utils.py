@@ -59,18 +59,18 @@ def text_to_wordlist(text, remove_stopwords=False, stem_words=False):
     return(text)
 
 
-def clean_NER():
-    SPECIAL_TOKENS = {
-        'quoted': 'quoted_item',
-        'non-ascii': 'non_ascii_word',
-        'undefined': 'something'
-    }   
-    is_substitute_proper_noun = True # [not implemented] a little complicated than it seems
-    is_remove_stopwords = False # not yet tested
-    if is_remove_stopwords:
-        from nltk.corpus import stopwords
-        stopwords = set(stopwords.words('english'))
-    def clean_string(text):
+# def clean_NER():
+#     SPECIAL_TOKENS = {
+#         'quoted': 'quoted_item',
+#         'non-ascii': 'non_ascii_word',
+#         'undefined': 'something'
+#     }   
+#     is_substitute_proper_noun = True # [not implemented] a little complicated than it seems
+#     is_remove_stopwords = False # not yet tested
+#     if is_remove_stopwords:
+#         from nltk.corpus import stopwords
+#         stopwords = set(stopwords.words('english'))
+def clean_string(text):
     
         def pad_str(s):
             return ' '+s+' '
@@ -278,3 +278,320 @@ def clean_NER():
         text = text.strip()
         
         return text
+
+
+def spcpy_clean(text):
+    ENTITY_ENUM = {
+        '': '',
+        'PERSON': 'person',
+        'NORP': 'nationality',
+        'FAC': 'facility',
+        'ORG': 'organization',
+        'GPE': 'country',
+        'LOC': 'location',
+        'PRODUCT': 'product',
+        'EVENT': 'event',
+        'WORK_OF_ART': 'artwork',
+        'LANGUAGE': 'language',
+        'DATE': 'date',
+        'TIME': 'time',
+    #     'PERCENT': 'percent',
+    #     'MONEY': 'money',
+    #     'QUANTITY': 'quantity',
+    #     'ORDINAL': 'ordinal',
+    #     'CARDINAL': 'cardinal',
+        'PERCENT': 'number',
+        'MONEY': 'number',
+        'QUANTITY': 'number',
+        'ORDINAL': 'number',
+        'CARDINAL': 'number',
+        'LAW': 'law'
+    }
+
+    NUMERIC_TYPES = set([
+        'DATE',
+        'TIME',
+        'PERCENT',
+        'MONEY',
+        'QUANTITY',
+        'ORDINAL',
+        'CARDINAL',
+    ])
+
+    spacy_obj_dict = {}
+    total_len = len(qid_dict)
+    for i,k in enumerate(qid_dict):
+        if i%50000==0:
+            print('Processed {} out of {}'.format(i,total_len))
+            
+        # some questions are null
+        if type(qid_dict[k])!= str:
+            qid_dict[k] = ''
+        spacy_obj_dict[k] = nlp(qid_dict[k])
+
+    vote_dict = {}
+    word_ent_type_dict = {}
+    word_ent_type_second_dict = {}
+
+    # construct vote dictionary
+
+    for qid in spacy_obj_dict:
+        
+        if qid%100000==0:
+            print('Processing {} / {}'.format(qid,len(spacy_obj_dict)))
+        
+        for token in spacy_obj_dict[qid]:
+                
+            if token.lower_ not in vote_dict:
+                vote_dict[token.lower_] = {}
+
+            if token.ent_type_ not in vote_dict[token.lower_]:
+                vote_dict[token.lower_][token.ent_type_] = 0
+            
+            # if the token has_vector is True, maybe we shouldn't record its 
+            
+            vote_dict[token.lower_][token.ent_type_] += 1 # TODO: not sure if storing in lowercase form is safe ?
+
+            
+    # vote for what should the type be
+        
+    for key in vote_dict:
+        
+        # non-type has lower priority
+        if '' in vote_dict[key]:
+            vote_dict[key][''] = vote_dict[key][''] - 0.1
+
+        ents = list(vote_dict[key].keys())
+        bi_list = [
+            ents,
+            [vote_dict[key][ent] for ent in ents]
+        ]
+        
+        # if several ent_type_ have same count, just let it go, making them share same ent_type_ is enough
+        # TODO: if have time, can design a better metric to deal with second graded type
+        sorted_idx = np.argsort(bi_list[1])
+        
+        if sorted_idx.shape[0]>1:
+            best_idx = sorted_idx[-1]
+            second_idx = sorted_idx[-2]
+            word_ent_type_dict[key] = bi_list[0][best_idx]
+            if bi_list[1][second_idx]>threshold_of_second_type:
+                word_ent_type_second_dict[key] = bi_list[0][second_idx]
+        else:
+            best_idx = sorted_idx[-1]
+            word_ent_type_dict[key] = bi_list[0][best_idx]
+
+    exception_list =  set(['need']) # spaCy identifies need's lamma as 'ne', which is not we want
+    numeric_types = set(['DATE', 'TIME', 'PERCENT', 'MONEY', 'QUANTITY', 'ORDINAL', 'CARDINAL'])
+
+    # APIs to access entity type
+
+    def token_type_lookup(token, report_detail=False):
+        
+        if type(token)==str:
+            token = nlp(token)[0]
+            
+        key = token.lower_
+        
+        try:
+            if report_detail:
+                print(ENTITY_ENUM[word_ent_type_dict[key]], ' <= ', {ENTITY_ENUM[ent_t] : vote_dict[key][ent_t] for ent_t in vote_dict[key]} )
+
+            return word_ent_type_dict[key]
+        
+        except KeyError:
+            return ''
+
+    def is_token_has_second_type(token):
+        
+        if type(token)==str:
+            token = nlp(token)[0]
+            
+        key = token.lower_
+        
+        try:
+            return key in word_ent_type_second_dict
+        except KeyError:
+            return False
+
+    def token_second_type_lookup(token, report_detail=False):
+        if type(token)==str:
+            token = nlp(token)[0]
+            
+        key = token.lower_
+        
+        try:
+            if report_detail:
+                print(ENTITY_ENUM[word_ent_type_second_dict[key]], ' <= ', {ENTITY_ENUM[ent_t] : vote_dict[key][ent_t] for ent_t in vote_dict[key]} )
+
+            return word_ent_type_second_dict[key]
+        except KeyError:
+            return ''
+
+    def process_question_with_spacy(spacy_obj, debug=False, show_fail=False, idx=None):
+
+        def not_alpha_or_digit(token):
+            ch = token.text[0]
+            return not (ch.isalpha() or ch.isdigit())
+        
+        result_word_list = []
+        res = ''
+        
+        # for continuous entity type string, we need only single term. 
+        # EX: "2017-01-01"
+        # => "time time time" (X)
+        # => "time" (O)
+        previous_ent_type = None
+        
+        is_a_word_parsed_fail = False
+        fail_words = []
+        
+        for token in spacy_obj:
+            
+            global_ent_type = token_type_lookup(token)
+            
+            # problematic token, use its base form
+            if token.text in exception_list:
+                
+                previous_ent_type = None
+                result_word_list.append(token.text)
+            
+            # special kind of tokens
+            elif token.text in SPECIAL_TOKENS.values():
+                
+                # we have no choice but use the entity type detected by spaCy directly, but it still might fail
+                if token.ent_type_!='':
+                    previous_ent_type = token.ent_type_
+                    result_word_list.append(token.ent_type_)
+                
+                else:
+                    previous_ent_type = None
+                    result_word_list.append(token.text)
+                    
+                
+            # skip none words tokens
+            elif not_alpha_or_digit(token) or token.text==' ' or token.text=='s':
+                previous_ent_type = None
+                if debug: print(token.text, ' : remove punc or special chars')
+                
+                
+            # if the "remove stop word" flag is set to True
+            elif is_remove_stopwords and token.lemma_ in is_remove_stopwords:
+                previous_ent_type = None
+                if debug: print(token.text, ' : remove stop word')
+            
+            
+            # contiguous same type, skip it
+            elif global_ent_type==previous_ent_type or token.ent_type_==previous_ent_type:
+                if debug: print('contiguous same type')
+            elif global_ent_type in NUMERIC_TYPES and previous_ent_type in NUMERIC_TYPES:
+                if debug: print('contiguous numeric')
+            elif token.ent_type_ in NUMERIC_TYPES and previous_ent_type in NUMERIC_TYPES:
+                if debug: print('contiguous numeric')
+                    
+            
+            # number without an ent_type_
+            elif token.text.isdigit():
+                
+                if debug: print(token.text, 'force to be number')
+                    
+                if previous_ent_type in NUMERIC_TYPES:
+                    pass
+                else:
+                    previous_ent_type = 'CARDINAL' # any number type would be okay
+                    result_word_list.append('number')
+
+        
+            # replace proper nouns into name entities. 
+            # EX:
+            # Original : Taiwan is next to China
+            # Result   : country is next to country 
+            elif global_ent_type!='':
+                
+                result_word_list.append(ENTITY_ENUM[global_ent_type])
+                previous_ent_type = global_ent_type
+                if debug: print(token.text, ' : sub ent_type:', ENTITY_ENUM[global_ent_type])
+                
+                
+            # Identify if a word is proper noun or not, if it is a proper noun, we'll try to use second highest rated ent_type_
+            #
+            # A proper noun has following special patterns:
+            #     1. its lemma_ (base form) returned by spaCy is just its lowercase form
+            #     2. if one of its character except the first character is uppercase, it is a propernoun (in most cases)
+            # except the special cases like "I LOVE YOU", we cal say that if (1.) and (2.), then the token is proper noun
+            #
+            # for cases like "Tensorflow", we have no good rule to identify it is a proper noun or not ... let's just move on
+            elif token.lower_==token.lemma_ and token.text[1:]!=token.lemma_[1:] and is_token_has_second_type(token):
+                second_type = token_second_type_lookup(token)
+                result_word_list.append(ENTITY_ENUM[second_type])
+                if debug: print(token.text, ' : use second ent_type:', ENTITY_ENUM[second_type])
+                previous_ent_type = second_type
+            
+            
+            # words arrive here are either "extremely common" or "extremely rare and has no method to deal with"
+            else:
+                # A weird behavior of SpaCy, it substitutes [I, my, they] into '-PRON-', which mean pronoun (代名詞)
+                # More detail in : https://github.com/explosion/spaCy/issues/962
+                if token.lemma_=='-PRON-':
+                    result_word_list.append(token.lower_)
+                    res = token.lower
+                    previous_ent_type = None
+                
+                # the lemma can be identified by GloVe
+                elif nlp(token.lemma_)[0].has_vector:
+                    result_word_list.append(token.lemma_)
+                    res = token.lemma_
+                    previous_ent_type = None
+                
+                # the lemma cannot be identified, very probably a proper noun
+                elif is_token_has_second_type(token):
+                    second_type = token_second_type_lookup(token)
+                    result_word_list.append(ENTITY_ENUM[second_type])
+                    res = ENTITY_ENUM[second_type]
+                    previous_ent_type = second_type
+                    if debug: print(token.text, ' : use second ent_type in else :', ENTITY_ENUM[second_type])
+                
+                # the lemma is not in glove and Spacy can't identify if it is a proper noun, last try, 
+                #      if the word itself can be identified by GloVe or not
+                elif nlp(token.lower_)[0].has_vector:
+                    result_word_list.append(token.lower_)
+                    res = token.lower_
+                    previous_ent_type = None
+                    if debug: print(token.text, ' : the token itself can be identified :', token.lower_)
+                elif token.has_vector:
+                    result_word_list.append(token.text)
+                    res = token.text
+                    previous_ent_type = None
+                    if debug: print(token.text, ' : the token itself can be identified :', token.text)
+                    
+                # Damn, I have totally no idea what's going on
+                # You got to deal with it by yourself
+                # In my case, I use fasttext to deal with it
+                else:
+                    is_a_word_parsed_fail = True
+                    fail_words.append(token.text)
+                    previous_ent_type = None
+                    
+                    #  Question:
+                    #  can we replace all this kind of word into "something" ?
+                    result_word_list.append(SPECIAL_TOKENS['undefined'])
+                    if debug: print(token.text, ' : can\'t identify, replace with "something"')
+                    
+        
+        if show_fail and is_a_word_parsed_fail:
+            if idx!=None:
+                print('At qid=', idx)
+            print('Fail words: ', fail_words)
+            print('Before:', spacy_obj.text)
+            print('After: ', ' '.join(result_word_list))
+            print('====================================================================')
+        
+        return np.array(result_word_list)
+
+    def process_new_string(s):
+        s = clean_string(s)
+        s = nlp(s)
+        s = process_question_with_spacy(s)
+        return s
+
+    return process_new_string(text)

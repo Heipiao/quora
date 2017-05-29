@@ -1,3 +1,4 @@
+
 import argparse
 import functools
 from collections import defaultdict
@@ -251,6 +252,9 @@ def main():
     X_train = pd.concat((X_train, X_train_ab, train_leaky), axis=1)
     y_train = df_train['is_duplicate'].values
 
+    # SAVE TRAIN_DTATA
+    print(X_train.shape)
+    pd.concat([X_train,y_train],axis=1).to_csv("features/leak_train",index=False)
     X_train, X_valid, y_train, y_valid = train_test_split(X_train, y_train, test_size=0.1, random_state=4242)
 
     #UPDownSampling
@@ -282,10 +286,11 @@ def main():
     d_valid = xgb.DMatrix(X_valid, label=y_valid)
 
     watchlist = [(d_train, 'train'), (d_valid, 'valid')]
-
-    bst = xgb.train(params, d_train, 2500, watchlist, early_stopping_rounds=50, verbose_eval=50)
-    print(log_loss(y_valid, bst.predict(d_valid)))
-    bst.save_model(args.save + '.mdl')
+    
+    # NOT TRAIN
+    #bst = xgb.train(params, d_train, 2500, watchlist, early_stopping_rounds=50, verbose_eval=50,slient=True)
+    #print(log_loss(y_valid, bst.predict(d_valid)))
+    #bst.save_model(args.save + '.mdl')
 
 
     print('Building Test Features')
@@ -302,6 +307,11 @@ def main():
     
     x_test = build_features(df_test, stops, weights)
     x_test = pd.concat((x_test, x_test_ab, test_leaky), axis=1)
+
+    # SAVE TEST_DTATA
+    print(x_test.shape)
+    x_test.to_csv("features/leak_test",index=False)
+
     d_test = xgb.DMatrix(x_test)
     p_test = bst.predict(d_test)
     sub = pd.DataFrame()
