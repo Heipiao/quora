@@ -3,9 +3,18 @@ import pandas as pd
 import re
 import gensim
 
-from utils import text_to_wordlist
+from nltk.corpus import stopwords
+from nltk.stem import SnowballStemmer
 from keras.preprocessing.text import Tokenizer
 from keras.preprocessing.sequence import pad_sequences
+from keras.layers import Dense, Input, LSTM, Embedding, Dropout, Activation
+from keras.layers.merge import concatenate
+from keras.models import Model
+from keras.layers.normalization import BatchNormalization
+from keras.callbacks import EarlyStopping, ModelCheckpoint
+
+from utils import text_to_wordlist
+
 
 #model = gensim.models.KeyedVectors.load_word2vec_format('data/GoogleNews-vectors-negative300.bin.gz', binary=True)
 
