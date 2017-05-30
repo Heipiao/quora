@@ -124,7 +124,7 @@ leak_train = pd.read_csv(LEAK_TRAIN_PATH)
 leak_test = pd.read_csv(LEAK_TEST_PATH)
 
 leak_train = leak_train.as_matrix()[idx_train]
-leak_test = leak_test.as_matrix()[idx_test]
+leak_test = leak_test.as_matrix()[idx_val]
 
 weight_val = np.ones(len(labels_val))
 if re_weight:
